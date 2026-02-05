@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine, text
+import gc
 
 # --- 1. ตั้งค่าหน้าเว็บ ---
 st.set_page_config(page_title="Excel to MySQL Cleaner", layout="wide")
@@ -138,6 +139,10 @@ if uploaded_file is not None:
             
             except Exception as e:
                 st.error(f"❌ Error during upload/processing: {e}")
+            finally:
+                # Free large dataframes after upload to reduce memory pressure
+                del df_final
+                gc.collect()
 
     except Exception as e:
         st.error(f"❌ Error during processing: {e}")

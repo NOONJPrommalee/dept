@@ -7,7 +7,7 @@ import plotly.express as px
 st.set_page_config(page_title="Debt Management Dashboard 2026", layout="wide")
 
 # --- 2. ฟังก์ชันโหลดข้อมูล (เพิ่มการจัดการ Error กรณีไม่มีตาราง) ---
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=300, max_entries=2)
 def load_data_from_db(conn_str, table_name):
     engine = create_engine(conn_str)
     try:
@@ -31,8 +31,7 @@ st.markdown("### ระบบบริหารจัดการลูกหน
 # ปุ่มสำหรับกด Refresh ข้อมูลด้วยตัวเอง
 if st.sidebar.button("🔄 อัปเดตข้อมูลจาก Database"):
     st.cache_data.clear()
-    if 'df_raw' in st.session_state:
-        del st.session_state.df_raw
+    st.session_state.pop("load_dashboard_data", None)
     st.rerun()
 
 # --- 4. เริ่มกระบวนการดึงข้อมูล ---
@@ -41,11 +40,16 @@ conn_str = f"mysql+mysqlconnector://{conf['user']}:{conf['pass']}@{conf['host']}
 table_name = conf['table']
 
 try:
-    if 'df_raw' not in st.session_state:
-        with st.spinner("⏳ กำลังโหลดข้อมูลล่าสุด..."):
-            st.session_state.df_raw = load_data_from_db(conn_str, table_name)
-    
-    df_dash = st.session_state.df_raw.copy()
+    if not st.session_state.get("load_dashboard_data"):
+        st.info("กดปุ่มด้านล่างเพื่อโหลดข้อมูลจากฐานข้อมูล (ลดการใช้ RAM ตอนเริ่มต้น)")
+        if st.button("📥 โหลดข้อมูล Dashboard"):
+            st.session_state["load_dashboard_data"] = True
+            st.rerun()
+        st.stop()
+
+    with st.spinner("⏳ กำลังโหลดข้อมูลล่าสุด..."):
+        # Copy to avoid mutating cached data across sessions
+        df_dash = load_data_from_db(conn_str, table_name).copy()
 
     if not df_dash.empty:
         # --- [A. เตรียมข้อมูล & Mapping] ---
