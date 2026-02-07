@@ -4,6 +4,7 @@ port = 8501
 baseUrlPath = "upload-dept"
 enableCORS = false
 enableXsrfProtection = false
+maxUploadSize = 1024
 
 [client]
 showErrorDetails = true
