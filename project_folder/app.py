@@ -56,7 +56,7 @@ db_user = st.sidebar.text_input("Username", value="root")
 db_pass = st.sidebar.text_input("Password", type="password", value="") 
 db_host = st.sidebar.text_input("Host", value="localhost")
 db_name = "dept"
-table_name = "dept_master"
+table_name = "dept_test"
 
 # --- 4. ส่วนการ Upload และประมวลผล ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx)", type=["xlsx", "xls"], accept_multiple_files=True)
@@ -168,26 +168,49 @@ if uploaded_files:
             mime='text/csv',
         )
 
-        if st.button("📤 ส่งข้อมูลเข้า MySQL และรัน Procedures", type="primary"):
-            try:
-                conn_str = f"mysql+mysqlconnector://{db_user}:{db_pass}@{db_host}/{db_name}"
-                engine = create_engine(conn_str)
-                
-                with engine.connect() as conn:
-                    conn.execute(text(f"TRUNCATE TABLE {table_name}"))
-                    conn.commit()
-                
-                with st.spinner('⏳ กำลังนำเข้าข้อมูล...'):
-                    df_final.to_sql(table_name, con=engine, if_exists='append', index=False, chunksize=5000)
-                
-                with st.spinner('⚙️ รัน Stored Procedure...'):
-                    with engine.begin() as conn:
-                        conn.execute(text("CALL sp_refresh_dashboard_master();"))
-                
-                st.balloons()
-                st.success(f"🚀 นำเข้าสำเร็จรวม {len(df_final):,} แถว!")
-                del df_final
-                gc.collect()
+if st.button("📤 ส่งข้อมูลเข้า MySQL และรัน Procedures", type="primary"):
+    try:
+        # 1. เปลี่ยนมาใช้ pymysql และเพิ่ม pool_pre_ping เพื่อเช็ค connection ก่อนส่ง
+        conn_str = f"mysql+pymysql://{db_user}:{db_pass}@{db_host}/{db_name}"
+        engine = create_engine(
+            conn_str, 
+            pool_pre_ping=True,      # ตรวจสอบการเชื่อมต่อก่อนใช้
+            pool_recycle=900        # รีไซเคิล connection ทุก 15 นาที
+        )
+        
+        # 2. ขั้นตอน Truncate: เปิดและปิดทันทีเพื่อไม่ให้ค้าง connection
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE TABLE {table_name}"))
+            # ไม่ต้องใส่ conn.commit() ถ้าใช้ engine.begin() มันจะทำให้เอง
+        
+        # 3. ขั้นตอนการ Insert: 
+        # ลองลด chunksize ลงเหลือ 1000 หรือ 500 หากเน็ตไม่เสถียร
+        with st.spinner('⏳ กำลังนำเข้าข้อมูล...'):
+            df_final.to_sql(
+                table_name, 
+                con=engine, 
+                if_exists='append', 
+                index=False, 
+                chunksize=1000,   # ลดขนาดลงมาหน่อยเพื่อความชัวร์
+                method='multi'    # ช่วยให้ insert เร็วขึ้น (เฉพาะ pymysql/mysqldb)
+            )
+        
+        # 4. ขั้นตอนรัน Procedure: เปิด connection ใหม่เพื่อกัน timeout
+        with st.spinner('⚙️ รัน Stored Procedure...'):
+            with engine.begin() as conn:
+                # เพิ่มการตั้งค่า session ป้องกัน timeout ขณะรัน procedure นานๆ
+                conn.execute(text("SET SESSION wait_timeout=600;")) 
+                conn.execute(text("CALL sp_refresh_dashboard_master();"))
+        
+        st.balloons()
+        st.success(f"🚀 นำเข้าสำเร็จรวม {len(df_final):,} แถว!")
+        
+        # Clear memory
+        del df_final
+        gc.collect()
 
-            except Exception as e:
-                st.error(f"❌ Database Error: {e}")
+    except Exception as e:
+        st.error(f"❌ Database Error: {e}")
+        # กรณี error ให้ลองเช็คว่า engine ยังอยู่ไหม
+        if 'engine' in locals():
+            engine.dispose()
