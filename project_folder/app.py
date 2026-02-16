@@ -56,7 +56,7 @@ db_user = st.sidebar.text_input("Username", value="root")
 db_pass = st.sidebar.text_input("Password", type="password", value="") 
 db_host = st.sidebar.text_input("Host", value="localhost")
 db_name = "dept"
-table_name = "dept_test"
+table_name = "dept_master"
 
 # --- 4. ส่วนการ Upload และประมวลผล ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx)", type=["xlsx", "xls"], accept_multiple_files=True)
