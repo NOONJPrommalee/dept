@@ -58,6 +58,16 @@ db_host = st.sidebar.text_input("Host", value="localhost")
 db_name = "dept_backup"
 table_name = "dept_master"
 
+st.sidebar.divider()
+st.sidebar.header("📅 เลือกช่วงเดือนที่ต้องการอัปเดต")
+# สร้าง List ของเดือน 01-12 และ ปี (พ.ศ.)
+selected_year = st.sidebar.selectbox("เลือก ปี (พ.ศ.)", [str(y) for y in range(2567, 2575)], index=2) # Default 2569
+selected_month = st.sidebar.selectbox("เลือก เดือน", [f"{m:02d}" for m in range(1, 13)], index=1) # Default 02
+
+# รวม format เป็น 'YYYY-MM' ตามที่ Procedure ต้องการ
+period_param = f"{selected_year}-{selected_month}"
+st.sidebar.info(f"Param: {period_param}")
+
 # --- 4. ส่วนการ Upload และประมวลผล ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx)", type=["xlsx", "xls"], accept_multiple_files=True)
 
@@ -196,11 +206,19 @@ if st.button("📤 ส่งข้อมูลเข้า MySQL และรั
             )
         
         # 4. ขั้นตอนรัน Procedure: เปิด connection ใหม่เพื่อกัน timeout
-        with st.spinner('⚙️ รัน Stored Procedure...'):
+        with st.spinner('⚙️ กำลังประมวลผล Stored Procedures...'):
             with engine.begin() as conn:
-                # เพิ่มการตั้งค่า session ป้องกัน timeout ขณะรัน procedure นานๆ
+                # ตั้งค่า session ป้องกัน timeout
                 conn.execute(text("SET SESSION wait_timeout=600;")) 
+                
+                # รัน Procedure ตัวเดิม
+                st.write("🔄 กำลังรัน: sp_refresh_dashboard_master...")
                 conn.execute(text("CALL sp_refresh_dashboard_master();"))
+                
+                # รัน Procedure ตัวใหม่ พร้อมส่งค่า period_param ('2569-02')
+                st.write(f"🔄 กำลังรัน: sp_update_kpi_debt_reduction('{period_param}')...")
+                # ใช้ระบุพารามิเตอร์แบบปลอดภัย
+                conn.execute(text("CALL sp_update_kpi_debt_reduction(:period)"), {"period": period_param})
         
         st.balloons()
         st.success(f"🚀 นำเข้าสำเร็จรวม {len(df_final):,} แถว!")
