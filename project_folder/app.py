@@ -55,7 +55,7 @@ st.sidebar.header("🔌 Database Connection")
 db_user = st.sidebar.text_input("Username", value="root")
 db_pass = st.sidebar.text_input("Password", type="password", value="") 
 db_host = st.sidebar.text_input("Host", value="localhost")
-db_name = "dept_backup"
+db_name = "dept"
 table_name = "dept_master"
 
 st.sidebar.divider()
