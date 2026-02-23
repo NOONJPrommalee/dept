@@ -7,6 +7,7 @@ import os
 import shutil
 import pythoncom
 import win32com.client as win32
+import win32com.client.dynamic
 
 # --- 1. ตั้งค่าหน้าเว็บ & Path ---
 st.set_page_config(page_title="RPA Excel to MySQL", layout="wide")
@@ -26,7 +27,7 @@ def rpa_convert_xls_to_xlsx(folder_path):
     pythoncom.CoInitialize() # แก้ปัญหา Thread ใน Streamlit
     try:
         # ใช้ Dispatch ธรรมดาเพื่อเลี่ยงปัญหา TypeError makepy ในบางเครื่อง
-        excel = win32.Dispatch('Excel.Application')
+        excel = win32com.client.dynamic.Dispatch('Excel.Application')
         excel.Visible = False
         excel.DisplayAlerts = False
         
@@ -65,8 +66,8 @@ selected_year = st.sidebar.selectbox("เลือก ปี (พ.ศ.)", [str(y
 selected_month = st.sidebar.selectbox("เลือก เดือน", [f"{m:02d}" for m in range(1, 13)], index=1) # Default 02
 
 # รวม format เป็น 'YYYY-MM' ตามที่ Procedure ต้องการ
-period_param = f"{selected_year}-{selected_month}"
-st.sidebar.info(f"Param: {period_param}")
+period_param = f"{selected_year}-{selected_month}-01"
+st.sidebar.info(f"Param ที่จะส่งให้ Procedure: {period_param}")
 
 # --- 4. ส่วนการ Upload และประมวลผล ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx)", type=["xlsx", "xls"], accept_multiple_files=True)
