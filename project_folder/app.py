@@ -61,12 +61,18 @@ table_name = "dept_master"
 
 st.sidebar.divider()
 st.sidebar.header("📅 เลือกช่วงเดือนที่ต้องการอัปเดต")
-# สร้าง List ของเดือน 01-12 และ ปี (พ.ศ.)
-selected_year = st.sidebar.selectbox("เลือก ปี (พ.ศ.)", [str(y) for y in range(2567, 2575)], index=2) # Default 2569
+# --- แก้ไขตรงนี้: เปลี่ยนเป็นปี ค.ศ. ---
+# สร้าง List ของปี ค.ศ. (เช่น 2024 - 2032)
+current_year = 2026 # หรือใช้ datetime.now().year
+year_list = [str(y) for y in range(2024, 2033)]
+selected_year = st.sidebar.selectbox("เลือก ปี (ค.ศ.)", year_list, index=year_list.index("2026"))
+
+# เลือกเดือน 01-12
 selected_month = st.sidebar.selectbox("เลือก เดือน", [f"{m:02d}" for m in range(1, 13)], index=1) # Default 02
 
-# รวม format เป็น 'YYYY-MM' ตามที่ Procedure ต้องการ
+# รวม format เป็น 'YYYY-MM-01' (เช่น 2026-02-01)
 period_param = f"{selected_year}-{selected_month}-01"
+
 st.sidebar.info(f"Param ที่จะส่งให้ Procedure: {period_param}")
 
 # --- 4. ส่วนการ Upload และประมวลผล ---
