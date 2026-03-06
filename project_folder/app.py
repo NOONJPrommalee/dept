@@ -77,7 +77,7 @@ db_user = st.sidebar.text_input("Username", value="root")
 db_pass = st.sidebar.text_input("Password", type="password", value="") 
 db_host = st.sidebar.text_input("Host", value="localhost")
 db_name = "dept_backup"
-table_name = "debt_master_ne"
+table_name = "dept_master"
 
 st.sidebar.divider()
 st.sidebar.header("📂 เลือกเขตและช่วงเดือน")
