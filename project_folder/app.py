@@ -148,14 +148,27 @@ if uploaded_files:
                 # กรองเฉพาะกลุ่มที่เลือก (D, E, F) - เช็คจากชื่อคอลัมน์ 'pea_code_main' ถ้ามี
                 # (แต่ใน mapping_dict ล่าสุด ลบ COL_27_TEMP ที่แมปเป็น pea_code_main ออกแล้ว 
                 # หากต้นฉบับไม่มีชื่อคอลัมน์นี้ จะถือว่าไม่กรองกลุ่ม หรือคุณอาจต้องเพิ่มชื่อหัวตารางจริงของ pea_code_main ใน mapping_dict)
+                # กรองเฉพาะกลุ่มที่เลือก (D, E, F) - เช็คจากชื่อคอลัมน์ 'pea_code_main' ถ้ามี
                 if 'pea_code_main' in df_temp.columns:
-                    df_temp = df_temp[df_temp['pea_code_main'].str.startswith(selected_group, na=False)]
+                    # Strip และแปลงเป็น string เพื่อความแน่นอน
+                    df_temp['pea_code_main'] = df_temp['pea_code_main'].astype(str).str.strip()
+                    
+                    # ตรวจสอบยอดเงินก่อนกรองกลุ่ม
+                    mask_group = df_temp['pea_code_main'].str.startswith(selected_group, na=False)
+                    df_excluded = df_temp[~mask_group].copy()
+                    df_temp = df_temp[mask_group].copy()
+                    
+                    if not df_excluded.empty:
+                        # คำนวณยอดเงินที่ถูกตัดออกเก็บไว้ในตัวแปร (ไม่แสดงผล)
+                        for col in ['outstanding_amount']:
+                            if col in df_excluded.columns:
+                                excl_sum = df_excluded[col].astype(str).str.replace(',', '').pipe(pd.to_numeric, errors='coerce').sum()
                 
                 if not df_temp.empty:
                     len_group = len(df_temp)
 
-                    # 4. กรองแถวขยะ
-                    dropna_subset = [c for c in ['ca_no', 'pea_code_main'] if c in df_temp.columns]
+                    # 4. กรองแถวขยะ (กรองเฉพาะรหัสการไฟฟ้าตามคำขอผู้ใช้)
+                    dropna_subset = [c for c in ['pea_code_main'] if c in df_temp.columns]
                     if dropna_subset:
                         df_temp = df_temp.dropna(subset=dropna_subset, how='any')
                     
@@ -166,10 +179,10 @@ if uploaded_files:
                     
                     len_clean = len(df_temp)
 
-                    # จัดการตัวเลข
+                    # จัดการตัวเลข (ลบ comma ออกก่อนแปลงเป็นตัวเลข)
                     for col in ['outstanding_amount', 'tax_amount']:
                         if col in df_temp.columns:
-                            df_temp[col] = pd.to_numeric(df_temp[col], errors='coerce').fillna(0.00)
+                            df_temp[col] = df_temp[col].astype(str).str.replace(',', '').pipe(pd.to_numeric, errors='coerce').fillna(0.00)
 
                     # จัดการ bill_month (จาก MM/YYYY เป็น YYYY-MM-01)
                     if 'bill_month' in df_temp.columns:
@@ -181,7 +194,8 @@ if uploaded_files:
 
                     if not df_temp.empty:
                         all_dataframes.append(df_temp)
-                        st.write(f"📊 **{uploaded_file.name}**: อ่านได้ {len_raw:,} แถว | กลุ่ม {selected_group} {len_group:,} แถว | Cleaned {len_clean:,} แถว")
+                        total_out = df_temp['outstanding_amount'].sum() if 'outstanding_amount' in df_temp.columns else 0
+                        st.write(f"📊 **{uploaded_file.name}**: อ่านได้ {len_raw:,} แถว | กลุ่ม {selected_group} {len_group:,} แถว | Cleaned {len_clean:,} แถว | ยอดรวม: {total_out:,.2f}")
                     else:
                         st.warning(f"⚠️ ไฟล์ {uploaded_file.name}: ไม่มีข้อมูลกลุ่ม '{selected_group}' (อ่านได้ {len_raw:,} แถว)")
                 
