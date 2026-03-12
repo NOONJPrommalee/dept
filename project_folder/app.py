@@ -77,7 +77,7 @@ st.sidebar.header("🔌 Database Connection")
 db_user = "root"
 db_pass = "" 
 db_host = "localhost"
-db_name = st.sidebar.text_input("Database Name", value="debt")
+db_name = st.sidebar.text_input("Database Name", value="debt_ne")
 table_name = st.sidebar.text_input("Table Name", value="dept_master")
 
 st.sidebar.divider()
@@ -299,10 +299,10 @@ if not df_final.empty:
                     progress_sp.progress(0.5)
                     
                     # Procedure 2
-                    status_sp.write(f"⏳ 2/2: กำลังอัปเดต KPI Debt Reduction (sp_update_kpi_debt_reduction เดือน {selected_month}/{selected_year})...")
-                    conn.execute(text("CALL sp_update_kpi_debt_reduction(:period)"), {"period": period_param})
-                    progress_sp.progress(1.0)
-                    status_sp.write("✅ ประมวลผล Stored Procedures เสร็จสิ้น")
+                    #status_sp.write(f"⏳ 2/2: กำลังอัปเดต KPI Debt Reduction (sp_update_kpi_debt_reduction เดือน {selected_month}/{selected_year})...")
+                    #conn.execute(text("CALL sp_update_kpi_debt_reduction(:period)"), {"period": period_param})
+                    #progress_sp.progress(1.0)
+                    #status_sp.write("✅ ประมวลผล Stored Procedures เสร็จสิ้น")
                 
                 # ตรวจสอบจำนวนแถวใน DB จริงอีกครั้งเพื่อความมั่นใจ
                 with engine.connect() as conn:
