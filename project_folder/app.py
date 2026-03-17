@@ -9,7 +9,7 @@ from datetime import datetime
 
 # --- 1. ตั้งค่าหน้าเว็บ & Path ---
 st.set_page_config(page_title="Smart Multi-Group Uploader", layout="wide")
-st.title("🚀 Smart Multi-Group Uploader : Debt Flow")
+st.title("🚀 Data Upload : Debt Flow (ZCANR030)")
 
 # กำหนด Path
 BASE_DIR = r"D:\work\บน\dept\project_folder\convert"
@@ -81,18 +81,28 @@ db_name = st.sidebar.text_input("Database Name", value="debt_ne")
 table_name = st.sidebar.text_input("Table Name", value="dept_master")
 
 st.sidebar.divider()
-st.sidebar.header("📂 เลือกเขตและช่วงเดือน")
+st.sidebar.header("📂 เลือกโหมดและเขต")
 
-# Dropdown เลือกกลุ่ม (D, E, F)
-selected_group = st.sidebar.selectbox("เลือกเขตที่ต้องการอัปโหลด", ["D", "E", "F"], index=1)
+upload_scope = st.sidebar.radio(
+    "รูปแบบการอัปโหลด",
+    ["อัพโหลดเฉพาะ E", "อัพโหลดแบบ เลือกเขต D,E,F"],
+    index=0
+)
+
+if upload_scope == "อัพโหลดเฉพาะ E":
+    selected_group = "E"
+    st.sidebar.info("📌 ล็อคการนำเข้าเฉพาะเขต E")
+else:
+    # Dropdown เลือกกลุ่ม (D, E, F)
+    selected_group = st.sidebar.selectbox("เลือกเขตที่ต้องการอัปโหลด", ["D", "E", "F"], index=1)
 
 current_year = datetime.now().year
 current_month = datetime.now().month
 year_list = [str(y) for y in range(2024, 2033)]
-selected_year = st.sidebar.selectbox("เลือก ปี (ค.ศ.)", year_list, index=year_list.index(str(current_year)))
-selected_month = st.sidebar.selectbox("เลือก เดือน", [f"{m:02d}" for m in range(1, 13)], index=current_month - 1)
+#selected_year = st.sidebar.selectbox("เลือก ปี (ค.ศ.)", year_list, index=year_list.index(str(current_year)))
+#selected_month = st.sidebar.selectbox("เลือก เดือน", [f"{m:02d}" for m in range(1, 13)], index=current_month - 1)
 
-period_param = f"{selected_year}-{selected_month}-01"
+#period_param = f"{selected_year}-{selected_month}-01"
 
 st.sidebar.divider()
 st.sidebar.header("⚙️ ตั้งค่าการอัปโหลด")
@@ -128,67 +138,53 @@ if uploaded_files:
             df_temp = smart_read_file(temp_path)
             
             if df_temp is not None:
-                # --- [Clean Data Logic] ---
                 len_raw = len(df_temp)
                 
-                # 1. ลบคอลัมน์ที่ว่าง (Empty Columns) ออกทั้งหมดก่อน เพื่อปรับจำนวนคอลัมน์ให้เหมาะสม
-                df_temp = df_temp.dropna(axis=1, how='all')
-                
-                # 2. Rename ตาม mapping และ Strip whitespace หัวตาราง
+                # 1. Clean columns and rename
                 df_temp.columns = [str(c).strip() for c in df_temp.columns]
                 df_temp = df_temp.rename(columns=mapping_dict)
                 
-                # 🧹 ล้างช่องว่างในทุกคอลัมน์ที่เป็นข้อความ และแปลงค่าว่างเป็น NaN เพื่อให้ MySQL บันทึกเป็น NULL
-                for col in df_temp.select_dtypes(include=['object']).columns:
-                    df_temp[col] = df_temp[col].fillna("").astype(str).str.strip().replace('', np.nan)
-
-                # 3. กำหนดคอลัมน์หลัก (กรณีมีคอลัมน์ที่ Map ได้)
-                final_cols = [v for v in mapping_dict.values() if v in df_temp.columns]
-                if final_cols:
-                    df_temp = df_temp[list(dict.fromkeys(final_cols))].copy()
-
-                # กรองเฉพาะกลุ่มที่เลือก (D, E, F) - เช็คจากชื่อคอลัมน์ 'pea_code_main' ถ้ามี
-                # (แต่ใน mapping_dict ล่าสุด ลบ COL_27_TEMP ที่แมปเป็น pea_code_main ออกแล้ว 
-                # หากต้นฉบับไม่มีชื่อคอลัมน์นี้ จะถือว่าไม่กรองกลุ่ม หรือคุณอาจต้องเพิ่มชื่อหัวตารางจริงของ pea_code_main ใน mapping_dict)
-                # กรองเฉพาะกลุ่มที่เลือก (D, E, F) - เช็คจากชื่อคอลัมน์ 'pea_code_main' ถ้ามี
-                if 'pea_code_main' in df_temp.columns:
-                    # Strip และแปลงเป็น string เพื่อความแน่นอน
-                    df_temp['pea_code_main'] = df_temp['pea_code_main'].astype(str).str.strip()
-                    
-                    # ตรวจสอบยอดเงินก่อนกรองกลุ่ม
-                    mask_group = df_temp['pea_code_main'].str.startswith(selected_group, na=False)
-                    df_excluded = df_temp[~mask_group].copy()
-                    df_temp = df_temp[mask_group].copy()
-                    
-                    if not df_excluded.empty:
-                        # คำนวณยอดเงินที่ถูกตัดออกเก็บไว้ในตัวแปร (ไม่แสดงผล)
-                        for col in ['outstanding_amount']:
-                            if col in df_excluded.columns:
-                                excl_sum = df_excluded[col].astype(str).str.replace(',', '').pipe(pd.to_numeric, errors='coerce').sum()
+                # 2. Ensure all expected columns exist (even if empty)
+                for eng_col in mapping_dict.values():
+                    if eng_col not in df_temp.columns:
+                        df_temp[eng_col] = np.nan
                 
-                if not df_temp.empty:
-                    len_group = len(df_temp)
+                # 3. Select and order columns
+                ordered_cols = list(dict.fromkeys(mapping_dict.values()))
+                df_temp = df_temp[ordered_cols].copy()
 
-                    # 4. กรองแถวขยะ (กรองเฉพาะรหัสการไฟฟ้าตามคำขอผู้ใช้)
-                    dropna_subset = [c for c in ['pea_code_main'] if c in df_temp.columns]
-                    if dropna_subset:
-                        df_temp = df_temp.dropna(subset=dropna_subset, how='any')
-                    
-                    if 'ca_no' in df_temp.columns:
-                        df_temp = df_temp[df_temp['ca_no'].astype(str).str.contains(r'\d', na=False)]
-                        exclude_headers = ['หมายเลขผู้ใช้ไฟฟ้า', 'ca_no', 'เลขที่เอกสาร CA', 'สัญญา']
-                        df_temp = df_temp[~df_temp['ca_no'].astype(str).isin(exclude_headers)]
-                    
+                # 4. Clean text and convert empty to NaN
+                for col in df_temp.select_dtypes(include=['object']).columns:
+                    df_temp[col] = df_temp[col].fillna("").astype(str).str.strip().replace(['', 'nan', 'NaN', 'None'], np.nan)
+
+                # 5. Filter group and group cleaning
+                if 'pea_code_main' in df_temp.columns:
+                    mask_group = df_temp['pea_code_main'].astype(str).str.startswith(selected_group, na=False)
+                    df_temp = df_temp[mask_group].copy()
+                
+                len_group = len(df_temp)
+
+                # 6. Filter out headers and empty rows
+                if 'ca_no' in df_temp.columns:
+                    header_labels = ['หมายเลขผู้ใช้ไฟฟ้า', 'ca_no', 'เลขที่เอกสาร CA', 'สัญญา']
+                    df_temp = df_temp[~df_temp['ca_no'].astype(str).isin(header_labels)]
+                    # Ensure ca_no has digits
+                    df_temp = df_temp[df_temp['ca_no'].astype(str).str.contains(r'\d', na=False)]
+
+                # Drop purely NaN rows
+                df_temp = df_temp.dropna(how='all')
+
+                if not df_temp.empty:
                     len_clean = len(df_temp)
 
-                    # จัดการตัวเลข (ลบ comma ออกก่อนแปลงเป็นตัวเลข)
+                    # Manage numbers
                     for col in ['outstanding_amount', 'tax_amount']:
                         if col in df_temp.columns:
                             df_temp[col] = df_temp[col].astype(str).str.replace(',', '').pipe(pd.to_numeric, errors='coerce').fillna(0.00)
 
-                    # จัดการ bill_month (จาก MM/YYYY เป็น YYYY-MM-01)
+                    # Manage bill_month
                     if 'bill_month' in df_temp.columns:
-                        df_temp = df_temp[df_temp['bill_month'].notna() & (df_temp['bill_month'].astype(str) != 'nan')]
+                        df_temp = df_temp[df_temp['bill_month'].notna()]
                         df_temp['bill_month'] = df_temp['bill_month'].astype(str).apply(
                             lambda x: f"{x.split('/')[1]}-{x.split('/')[0].zfill(2)}-01" if '/' in x else x
                         )
@@ -197,9 +193,11 @@ if uploaded_files:
                     if not df_temp.empty:
                         all_dataframes.append(df_temp)
                         total_out = df_temp['outstanding_amount'].sum() if 'outstanding_amount' in df_temp.columns else 0
-                        st.write(f"📊 **{uploaded_file.name}**: อ่านได้ {len_raw:,} แถว | กลุ่ม {selected_group} {len_group:,} แถว | Cleaned {len_clean:,} แถว | ยอดรวม: {total_out:,.2f}")
+                        st.write(f"📊 **{uploaded_file.name}**: อ่านได้ {len_raw:,} แถว | กลุ่ม {selected_group} {len_group:,} แถว | Cleaned {len(df_temp):,} แถว | ยอดรวม: {total_out:,.2f}")
                     else:
-                        st.warning(f"⚠️ ไฟล์ {uploaded_file.name}: ไม่มีข้อมูลกลุ่ม '{selected_group}' (อ่านได้ {len_raw:,} แถว)")
+                        st.warning(f"⚠️ ไฟล์ {uploaded_file.name}: ไม่มีข้อมูลที่ถูกต้องหลังจากทำความสะอาด")
+                else:
+                    st.warning(f"⚠️ ไฟล์ {uploaded_file.name}: ไม่มีข้อมูลกลุ่ม '{selected_group}' หรือแถวว่าง (อ่านได้ {len_raw:,} แถว)")
                 
                 # ย้ายไป Archive และลบไฟล์ชั่วคราว
                 shutil.move(temp_path, os.path.join(ARCHIVE_DIR, uploaded_file.name))
@@ -237,35 +235,42 @@ if not df_final.empty:
                 with engine.connect() as conn:
                     # 🚩 จัดการข้อมูลเก่าตามโหมดที่เลือก
                     if "Overwrite" in upload_mode:
-                        st.warning(f"🗑️ กำลังล้างข้อมูลเก่าของกลุ่ม {selected_group}...")
-                        
-                        # นับจำนวนแถวที่จะลบก่อนเพื่อให้แสดง % ได้
-                        count_query = text(f"SELECT COUNT(*) FROM {table_name} WHERE pea_code_main LIKE :pattern")
-                        total_to_delete = conn.execute(count_query, {"pattern": f"{selected_group}%"}).scalar()
-                        
-                        progress_del = st.progress(0)
-                        status_del = st.empty()
-                        
-                        total_deleted = 0
-                        if total_to_delete > 0:
-                            while True:
-                                # ลบบันทึกทีละชุด (50,000 แถว) เพื่อป้องกัน Timeout/Lock
-                                delete_query = text(f"DELETE FROM {table_name} WHERE pea_code_main LIKE :pattern LIMIT 50000")
-                                result = conn.execute(delete_query, {"pattern": f"{selected_group}%"})
-                                conn.commit()  # ทำการ commit ทันทีในแต่ละชุด
-                                
-                                rows_deleted = result.rowcount
-                                total_deleted += rows_deleted
-                                
-                                percent = min(total_deleted / total_to_delete, 1.0)
-                                progress_del.progress(percent)
-                                status_del.write(f"✅ ลบข้อมูลแล้ว: {total_deleted:,} / {total_to_delete:,} แถว ({percent*100:.1f}%)")
-                                
-                                if rows_deleted == 0:
-                                    break
+                        if upload_scope == "อัพโหลดเฉพาะ E":
+                            st.warning(f"🗑️ กำลังล้างข้อมูลทั้งหมดในตาราง {table_name} (TRUNCATE)...")
+                            conn.execute(text(f"TRUNCATE TABLE {table_name}"))
+                            conn.commit()
+                            status_del = st.empty()
+                            status_del.write(f"✅ ล้างข้อมูลทั้งหมดในตาราง {table_name} เรียบร้อยแล้ว")
                         else:
-                            progress_del.progress(1.0)
-                            status_del.write("✅ ไม่พบข้อมูลเก่าที่ต้องลบ")
+                            st.warning(f"🗑️ กำลังล้างข้อมูลเก่าของกลุ่ม {selected_group}...")
+                            
+                            # นับจำนวนแถวที่จะลบก่อนเพื่อให้แสดง % ได้
+                            count_query = text(f"SELECT COUNT(*) FROM {table_name} WHERE pea_code_main LIKE :pattern")
+                            total_to_delete = conn.execute(count_query, {"pattern": f"{selected_group}%"}).scalar()
+                            
+                            progress_del = st.progress(0)
+                            status_del = st.empty()
+                            
+                            total_deleted = 0
+                            if total_to_delete > 0:
+                                while True:
+                                    # ลบบันทึกทีละชุด (50,000 แถว) เพื่อป้องกัน Timeout/Lock
+                                    delete_query = text(f"DELETE FROM {table_name} WHERE pea_code_main LIKE :pattern LIMIT 50000")
+                                    result = conn.execute(delete_query, {"pattern": f"{selected_group}%"})
+                                    conn.commit()  # ทำการ commit ทันทีในแต่ละชุด
+                                    
+                                    rows_deleted = result.rowcount
+                                    total_deleted += rows_deleted
+                                    
+                                    percent = min(total_deleted / total_to_delete, 1.0)
+                                    progress_del.progress(percent)
+                                    status_del.write(f"✅ ลบข้อมูลแล้ว: {total_deleted:,} / {total_to_delete:,} แถว ({percent*100:.1f}%)")
+                                    
+                                    if rows_deleted == 0:
+                                        break
+                            else:
+                                progress_del.progress(1.0)
+                                status_del.write("✅ ไม่พบข้อมูลเก่าที่ต้องลบ")
                     else:
                         st.info(f"⏭️ โหมด Append: ข้ามขั้นตอนการลบข้อมูลเก่าของกลุ่ม {selected_group}")
 
@@ -289,20 +294,15 @@ if not df_final.empty:
                 
                 # รัน Procedures
                 st.info("⚙️ กำลังประมวลผล Stored Procedures...")
-                progress_sp = st.progress(0)
-                status_sp = st.empty()
                 
                 with engine.begin() as conn:
                     # Procedure 1
-                    status_sp.write("⏳ 1/2: กำลังรีเฟรช Dashboard Master (sp_refresh_dashboard_master)...")
                     conn.execute(text("CALL sp_refresh_dashboard_master();"))
-                    progress_sp.progress(0.5)
                     
                     # Procedure 2
-                    #status_sp.write(f"⏳ 2/2: กำลังอัปเดต KPI Debt Reduction (sp_update_kpi_debt_reduction เดือน {selected_month}/{selected_year})...")
                     #conn.execute(text("CALL sp_update_kpi_debt_reduction(:period)"), {"period": period_param})
-                    #progress_sp.progress(1.0)
-                    #status_sp.write("✅ ประมวลผล Stored Procedures เสร็จสิ้น")
+                    
+                st.success("✅ ดำเนินการอัปเดต Procedures เสร็จเรียบร้อย")
                 
                 # ตรวจสอบจำนวนแถวใน DB จริงอีกครั้งเพื่อความมั่นใจ
                 with engine.connect() as conn:
