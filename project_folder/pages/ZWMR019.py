@@ -16,20 +16,29 @@ ARCHIVE_DIR = os.path.join(BASE_DIR, "Completed_Archive")
 
 # --- 2. Mapping & Logic ---
 mapping_dict_activity = {
-    'รหัสการไฟฟ้า': 'pea_code',
+    'รหัสการไฟฟ้า': 'pea_code_main',
+    'ใบแจ้งดำเนินการ': 'notice_doc_no',
     'ผู้ปฏิบัติงาน': 'worker_id',
     'การดำเนินการ': 'action_name',
-    'ใบแจ้งดำเนินการ': 'notice_doc_no',
+    'กิจกรรม PM': 'pm_activity',
+    'ประเภทกิจกรรม': 'activity_type',
+    'Flag': 'flag',
+    'ต้นทุน CO': 'co_cost',
     'เอกสารเสนองดจ่ายไฟ': 'disconnect_doc_no',
+    'วันที่แจ้งดำเนินการ': 'notice_date',
+    'วันที่กำหนดแล้วเสร็จ': 'due_date',
     'บัญชีแสดงสัญญา': 'ca_no',
-    'ชื่อ-สกุล':'customer_name',
+    'ชื่อ-สกุล': 'customer_name',
     'เลขที่มิเตอร์ที่ดำเนินการ': 'meter_no',
     'หน่วยอ่าน': 'read_unit',
-    'Flag': 'flag',
     'วันที่บันทึกจริง': 'actual_record_date',
     'วันที่ดำเนินการ': 'action_date',
     'เวลาที่ดำเนินการ': 'action_time',
+    'ใบสั่งงาน': 'work_order_no',
+    'กลับรายการ': 'reverse_item',
     'ผู้บันทึกข้อมูล': 'recorder_id',
+    'ชื่อนามสกุล(ผู้บันทึก)': 'recorder_name'
+
 }
 
 def smart_read_activity(file_path):
@@ -84,12 +93,20 @@ table_name = st.sidebar.text_input("Table Name", value="dept_activity_master")
 
 st.sidebar.divider()
 st.sidebar.header("⚙️ ตั้งค่าการอัปโหลด")
+
+# --- เพิ่มส่วนเลือกประเภทกิจกรรม ---
+activity_type = st.sidebar.radio(
+    "เลือกประเภทข้อมูลที่อัปโหลด",
+    ["ต่อกลับ", "งดจ่าย"],
+    index=0
+)
+
 upload_mode = st.sidebar.radio(
     "โหมดการอัปโหลด",
     ["ล้างข้อมูลเดิม อัปโหลดใหม่ (Overwrite)", "เพิ่มเติมข้อมูลเดิม (Append)"],
     index=0
 )
-st.sidebar.warning(f"โหมด: {upload_mode.split(' ')[0]}")
+st.sidebar.warning(f"โหมด: {upload_mode.split(' ')[0]} | ประเภท: {activity_type}")
 
 # --- 4. Upload & Process ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx) : ZWMR019", type=["xlsx", "xls"], accept_multiple_files=True)
@@ -122,13 +139,19 @@ if uploaded_files:
                     if eng_col not in df_temp.columns:
                         df_temp[eng_col] = np.nan
                 
-                # 3. Select only mapped columns in order
+                # 3. Add activity_type_upload column
+                df_temp['activity_type_upload'] = activity_type
+
+                # 4. Select only mapped columns in order
                 ordered_cols = list(dict.fromkeys(mapping_dict_activity.values()))
+                if 'activity_type_upload' not in ordered_cols:
+                    ordered_cols.append('activity_type_upload')
                 df_temp = df_temp[ordered_cols].copy()
 
                 # 4. Strip whitespace and convert empty strings to NaN
                 for col in df_temp.select_dtypes(include=['object']).columns:
                     df_temp[col] = df_temp[col].fillna("").astype(str).str.strip().replace(['', 'nan', 'NaN', 'None'], np.nan)
+
 
                 # 5. Filter out duplicate headers and purely empty rows
                 if 'ca_no' in df_temp.columns:
@@ -143,7 +166,7 @@ if uploaded_files:
 
                 if not df_temp.empty:
                     # Handle Date columns
-                    date_cols = ['notice_date', 'due_date', 'actual_record_date', 'action_date']
+                    date_cols = ['notice_date', 'due_date', 'actual_record_date', 'action_date', 'doc_date', 'notice_due_date']
                     for col in date_cols:
                         if col in df_temp.columns:
                             df_temp[col] = pd.to_datetime(df_temp[col], dayfirst=True, errors='coerce').dt.date
@@ -179,10 +202,10 @@ if not df_final.empty:
                 engine = create_engine(conn_str, pool_pre_ping=True)
                 with engine.connect() as conn:
                     if "Overwrite" in upload_mode:
-                        st.warning(f"🗑️ กำลังล้างข้อมูลทั้งหมดในตาราง {table_name} (TRUNCATE)...")
-                        conn.execute(text(f"TRUNCATE TABLE {table_name}"))
+                        st.warning(f"🗑️ กำลังล้างข้อมูลเฉพาะประเภท '{activity_type}' ในตาราง {table_name}...")
+                        conn.execute(text(f"DELETE FROM {table_name} WHERE activity_type_upload = :act_type"), {"act_type": activity_type})
                         conn.commit()
-                        st.success(f"✅ ล้างข้อมูลและรีเซ็ต ID เรียบร้อยแล้ว")
+                        st.success(f"✅ ล้างข้อมูลเก่าของประเภท '{activity_type}' เรียบร้อยแล้ว")
 
                     # Upload
                     st.info(f"⏳ กำลังนำเข้าข้อมูลใหม่ {len(df_final):,} แถว...")
