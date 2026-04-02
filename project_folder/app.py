@@ -77,7 +77,7 @@ st.sidebar.header("🔌 Database Connection")
 db_user = "root"
 db_pass = "" 
 db_host = "localhost"
-db_name = st.sidebar.text_input("Database Name", value="debt_ne")
+db_name = st.sidebar.text_input("Database Name", value="debt")
 table_name = st.sidebar.text_input("Table Name", value="dept_master")
 
 st.sidebar.divider()

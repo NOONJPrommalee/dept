@@ -13,6 +13,7 @@ st.title("📝 Data Upload : Debt Flow (ZWMR019)")
 
 BASE_DIR = r"D:\work\บน\dept\project_folder\convert"
 ARCHIVE_DIR = os.path.join(BASE_DIR, "Completed_Archive")
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 # --- 2. Mapping & Logic ---
 mapping_dict_activity = {
@@ -23,7 +24,6 @@ mapping_dict_activity = {
     'กิจกรรม PM': 'pm_activity',
     'ประเภทกิจกรรม': 'activity_type',
     'Flag': 'flag',
-    'ต้นทุน CO': 'co_cost',
     'เอกสารเสนองดจ่ายไฟ': 'disconnect_doc_no',
     'วันที่แจ้งดำเนินการ': 'notice_date',
     'วันที่กำหนดแล้วเสร็จ': 'due_date',
@@ -35,52 +35,71 @@ mapping_dict_activity = {
     'วันที่ดำเนินการ': 'action_date',
     'เวลาที่ดำเนินการ': 'action_time',
     'ใบสั่งงาน': 'work_order_no',
-    'กลับรายการ': 'reverse_item',
-    'ผู้บันทึกข้อมูล': 'recorder_id',
-    'ชื่อนามสกุล(ผู้บันทึก)': 'recorder_name'
-
+    'ผู้บันทึกข้อมูล': 'recorder_id'
 }
 
 def smart_read_activity(file_path):
     ext = os.path.splitext(file_path)[1].lower()
+    header_keywords = ['บัญชีแสดงสัญญา', 'เลขที่สัญญา', 'CA', 'Contract Account', 'BA', 'รหัสการไฟฟ้า', 'PEA', 'ใบแจ้งดำเนินการ', 'Notice']
+    
+    def find_h_idx(df):
+        if df is None or df.empty: return -1
+        # Scan first 60 rows for any keyword
+        for i, row in df.head(60).iterrows():
+            row_text = " ".join([str(x).replace('\xa0', ' ').strip().lower() for x in row.values])
+            if any(kw.lower() in row_text for kw in header_keywords):
+                return i
+        return -1
+
     try:
-        if ext in ['.xlsx', '.xls']:
-            df_check = pd.read_excel(file_path, header=None, skiprows=5, nrows=30)
-        else:
-            df_check = pd.read_csv(file_path, header=None, skiprows=5, nrows=30)
-        
-        h_idx_offset = -1
-        for i, row in df_check.iterrows():
-            if row.astype(str).str.contains('บัญชีแสดงสัญญา').any():
-                h_idx_offset = i
-                break
-        
-        if h_idx_offset == -1:
-            st.error(f"❌ ไม่พบหัวตาราง 'บัญชีแสดงสัญญา' ในไฟล์ {os.path.basename(file_path)}")
-            return None
-            
-        actual_header_row = 5 + h_idx_offset
-        
+        # Priority 1: Real Excel (XLSX or XLS)
         if ext == '.xlsx':
-            df = pd.read_excel(file_path, engine='openpyxl', header=actual_header_row)
-        elif ext == '.xls':
+            df_peak = pd.read_excel(file_path, engine='openpyxl', header=None, nrows=100)
+            h = find_h_idx(df_peak)
+            if h != -1: return pd.read_excel(file_path, engine='openpyxl', header=h)
+        else: # .xls variant
             try:
-                df = pd.read_excel(file_path, engine='xlrd', header=actual_header_row)
-            except:
-                dfs = pd.read_html(file_path)
-                df_html = dfs[0]
-                for i in range(5, 50):
-                    if df_html.iloc[i].astype(str).str.contains('บัญชีแสดงสัญญา').any():
-                        df_html.columns = [str(c).strip() for c in df_html.iloc[i]]
-                        df = df_html.iloc[i+1:].reset_index(drop=True)
-                        return df
-                return None
-        else:
-            df = pd.read_csv(file_path, header=actual_header_row, on_bad_lines='skip')
+                # Try as binary XLS (97-2003)
+                df_peak = pd.read_excel(file_path, engine='xlrd', header=None, nrows=100)
+                h = find_h_idx(df_peak)
+                if h != -1: return pd.read_excel(file_path, engine='xlrd', header=h)
+            except: pass
             
-        return df
+            # Priority 2: UTF-16 TSV (Very common for large SAP exports named .xls)
+            try:
+                # Use names=range(200) to safely read rows with potentially many columns
+                df_peak = pd.read_csv(file_path, sep='\t', encoding='utf-16', header=None, names=range(200), on_bad_lines='skip', nrows=100)
+                h = find_h_idx(df_peak)
+                if h != -1: 
+                    return pd.read_csv(file_path, sep='\t', encoding='utf-16', header=h, on_bad_lines='skip', low_memory=False)
+            except: pass
+            
+            # Priority 3: HTML Fallback (XML reports named .xls)
+            try:
+                html_dfs = pd.read_html(file_path)
+                for table in html_dfs:
+                    h = find_h_idx(table.head(100))
+                    if h != -1:
+                        table.columns = [str(c).strip() for c in table.iloc[h]]
+                        return table.iloc[h+1:].reset_index(drop=True)
+            except: pass
+
+        # Absolute Fallback: Flexible CSV with multiple encodings
+        for enc in ['utf-8-sig', 'tis-620', 'cp1252']:
+            try:
+                df_peak = pd.read_csv(file_path, header=None, nrows=100, on_bad_lines='skip', encoding=enc, sep=None, engine='python')
+                h = find_h_idx(df_peak)
+                if h != -1:
+                     return pd.read_csv(file_path, header=h, on_bad_lines='skip', encoding=enc, sep=None, engine='python')
+            except: continue
+
+        # Final Failure
+        st.error(f"❌ ไม่สามารถระบุรูปแบบไฟล์ หรือไม่พบหัวตารางในไฟล์ {os.path.basename(file_path)}")
+        st.info("💡 ไฟล์นี้ควรมีคอลัมน์ใดคอลัมน์หนึ่ง: " + ", ".join(header_keywords))
+        return None
+
     except Exception as e:
-        st.error(f"❌ Error logic ZWMR019 {os.path.basename(file_path)}: {e}")
+        st.error(f"❌ Error logic ZWMR019: {os.path.basename(file_path)}: {e}")
         return None
 
 # --- 3. Sidebar ---
@@ -225,10 +244,18 @@ if not df_final.empty:
                 st.balloons()
                 st.success(f"🚀 อัปโหลดสำเร็จ! ({len(df_final):,} แถว)")
                 
-                if session_filenames:
-                    for fname in session_filenames:
-                        fpath = os.path.join(ARCHIVE_DIR, fname)
-                        if os.path.exists(fpath): os.remove(fpath)
+                # ล้างไฟล์ใน Completed_Archive หลังจากอัปโหลดสำเร็จ
+                if os.path.exists(ARCHIVE_DIR):
+                    for f in os.listdir(ARCHIVE_DIR):
+                        f_path = os.path.join(ARCHIVE_DIR, f)
+                        try:
+                            if os.path.isfile(f_path) or os.path.islink(f_path):
+                                os.unlink(f_path)
+                            elif os.path.isdir(f_path):
+                                shutil.rmtree(f_path)
+                        except Exception as e:
+                            st.warning(f"⚠️ ไม่สามารถลบไฟล์ {f}: {e}")
+                    st.info(f"🧹 ทำความสะอาดโฟลเดอร์ {os.path.basename(ARCHIVE_DIR)} เรียบร้อยแล้ว")
                 
                 del df_final
                 gc.collect()
