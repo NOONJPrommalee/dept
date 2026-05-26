@@ -120,12 +120,22 @@ activity_type = st.sidebar.radio(
     index=0
 )
 
-upload_mode = st.sidebar.radio(
-    "โหมดการอัปโหลด",
-    ["ล้างข้อมูลเดิม อัปโหลดใหม่ (Overwrite)", "เพิ่มเติมข้อมูลเดิม (Append)"],
-    index=0
-)
-st.sidebar.warning(f"โหมด: {upload_mode.split(' ')[0]} | ประเภท: {activity_type}")
+# --- Month Selection for Filtering ---
+st.sidebar.subheader("📅 เลือกเดือนที่อัปโหลด (Action Date)")
+current_year = datetime.now().year
+years = list(range(current_year - 5, current_year + 5))
+months_th = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+]
+sel_year = st.sidebar.selectbox("ปี (YYYY)", years, index=years.index(current_year))
+sel_month_name = st.sidebar.selectbox("เดือน", months_th, index=datetime.now().month - 1)
+sel_month_idx = months_th.index(sel_month_name) + 1
+target_period_sql1 = f"{sel_year}-{sel_month_idx:02d}-%"  # For SQL LIKE e.g. 2026-03-%
+target_period_sql2 = f"%.{sel_month_idx:02d}.{sel_year}"  # For SQL LIKE e.g. %.03.2026
+target_period_df = f"{sel_month_idx:02d}.{sel_year}"
+
+st.sidebar.info(f"💡 ระบบจะทำการ **ลบข้อมูลเดิม** ของเดือน **{sel_month_name} {sel_year}** ประเภท **{activity_type}** ออกก่อน แล้วจึงนำเข้าข้อมูลใหม่จากไฟล์ที่ท่านอัปโหลด")
 
 # --- 4. Upload & Process ---
 uploaded_files = st.file_uploader("เลือกไฟล์ Excel (xls/xlsx) : ZWMR019", type=["xlsx", "xls"], accept_multiple_files=True)
@@ -147,6 +157,23 @@ if uploaded_files:
             df_temp = smart_read_activity(temp_path)
             
             if df_temp is not None:
+                # Check if it's a "ต่อกลับ" file when user selected "ต่อกลับ" mode
+                # "ต่อกลับ" files must have 'กิจกรรม PM' (pm_activity)
+                original_cols = [str(c).strip().replace('\xa0', ' ').lower() for c in df_temp.columns]
+                has_pm_activity = any('กิจกรรม' in col and 'pm' in col for col in original_cols) or ('pm_activity' in original_cols)
+                
+                if activity_type == "ต่อกลับ" and not has_pm_activity:
+                    st.error(f"❌ ไฟล์ {uploaded_file.name} ไม่ใช่ไฟล์ประเภท 'ต่อกลับ' (ไม่พบคอลัมน์ 'กิจกรรม PM') กรุณาตรวจสอบและเลือกประเภทข้อมูลให้ถูกต้อง")
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    continue
+                
+                if activity_type == "งดจ่าย" and has_pm_activity:
+                    st.error(f"❌ ไฟล์ {uploaded_file.name} ไม่ใช่ไฟล์ประเภท 'งดจ่าย' (พบคอลัมน์ 'กิจกรรม PM' ซึ่งเป็นส่วนหนึ่งของไฟล์ต่อกลับ) กรุณาตรวจสอบและเลือกประเภทข้อมูลให้ถูกต้อง")
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                    continue
+
                 len_raw = len(df_temp)
                 
                 # 1. Clean columns and rename
@@ -203,9 +230,22 @@ if uploaded_files:
 
     if all_dataframes:
         df_final = pd.concat(all_dataframes, ignore_index=True)
-        st.divider()
-        st.subheader(f"📊 ตัวอย่างข้อมูลรวม ({len(df_final):,} แถว)")
-        st.dataframe(df_final.head(10).fillna("Null"))
+        
+        # --- Filter by Selected Month/Year (action_date) ---
+        if 'action_date' in df_final.columns:
+            action_date_dt = pd.to_datetime(df_final['action_date'], errors='coerce')
+            df_final = df_final[
+                (action_date_dt.dt.year == sel_year) & 
+                (action_date_dt.dt.month == sel_month_idx)
+            ].copy()
+            
+        if df_final.empty:
+            st.error(f"❌ ไม่พบข้อมูลที่มีวันที่ดำเนินการ (Action Date) ตรงกับเดือน {sel_month_name} {sel_year}")
+            st.info("กรุณาตรวจสอบไฟล์ที่อัปโหลด หรือเปลี่ยนการเลือกเดือนใน Sidebar")
+        else:
+            st.divider()
+            st.subheader(f"📊 ตัวอย่างข้อมูลรวมเฉพาะเดือน {sel_month_name} {sel_year} ({len(df_final):,} แถว)")
+            st.dataframe(df_final.head(10).fillna("Null"))
 
 # --- 5. Export ---
 if not df_final.empty:
@@ -215,16 +255,39 @@ if not df_final.empty:
         st.download_button(label="📥 ดาวน์โหลด CSV", data=csv, file_name=f"ZWMR019_cleaned.csv", mime="text/csv", use_container_width=True)
 
     with col2:
+        # --- First Row Validation ---
+        first_row_date = "Unknown"
+        is_match = True
+        if 'action_date' in df_final.columns and len(df_final) > 0:
+            first_row_date = df_final.iloc[0]['action_date']
+            first_row_str = str(first_row_date)
+            expected_dash = f"{sel_year}-{sel_month_idx:02d}"
+            expected_dot = f"{sel_month_idx:02d}.{sel_year}"
+            if not (expected_dash in first_row_str or expected_dot in first_row_str):
+                is_match = False
+        
+        if not is_match:
+            st.warning(f"⚠️ **คำเตือน**: ข้อมูลแถวแรกมีวันที่ดำเนินการเป็น `{first_row_date}` ซึ่งไม่ตรงกับเดือนที่เลือก ({sel_month_name} {sel_year})")
+            st.info("กรุณาตรวจสอบให้แน่ใจว่าเลือกเดือนถูกต้องก่อนกดอัปโหลด")
+
         if st.button(f"📤 ส่งข้อมูลเข้า MySQL", type="primary", use_container_width=True):
             try:
                 conn_str = f"mysql+pymysql://{db_user}:{db_pass}@{db_host}/{db_name}"
                 engine = create_engine(conn_str, pool_pre_ping=True)
                 with engine.connect() as conn:
-                    if "Overwrite" in upload_mode:
-                        st.warning(f"🗑️ กำลังล้างข้อมูลเฉพาะประเภท '{activity_type}' ในตาราง {table_name}...")
-                        conn.execute(text(f"DELETE FROM {table_name} WHERE activity_type_upload = :act_type"), {"act_type": activity_type})
-                        conn.commit()
-                        st.success(f"✅ ล้างข้อมูลเก่าของประเภท '{activity_type}' เรียบร้อยแล้ว")
+                    st.warning(f"🗑️ กำลังล้างข้อมูลเฉพาะประเภท '{activity_type}' ประจำเดือน {sel_month_name} {sel_year}...")
+                    delete_query = text(
+                        f"DELETE FROM {table_name} "
+                        f"WHERE activity_type_upload = :act_type "
+                        f"AND (action_date LIKE :period1 OR action_date LIKE :period2)"
+                    )
+                    conn.execute(delete_query, {
+                        "act_type": activity_type,
+                        "period1": target_period_sql1,
+                        "period2": target_period_sql2
+                    })
+                    conn.commit()
+                    st.success(f"✅ ล้างข้อมูลเก่าประเภท '{activity_type}' ประจำเดือน {sel_month_name} {sel_year} เรียบร้อยแล้ว")
 
                     # Upload
                     st.info(f"⏳ กำลังนำเข้าข้อมูลใหม่ {len(df_final):,} แถว...")
